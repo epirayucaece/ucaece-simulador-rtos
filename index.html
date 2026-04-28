@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulación RTOS - Sistema Operativo de Tiempo Real</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- ==================== HEADER ==================== -->
+    <header class="header">
+        <h1>🖥️ Simulación de un Sistema Operativo de Tiempo Real (RTOS)</h1>
+        <p class="subtitle">Basado en principios de FreeRTOS, QNX, Tanenbaum & Silberschatz</p>
+        <div class="tick-display">
+            <span class="tick-label">⏱️ Tick del sistema:</span>
+            <span id="systemTick" class="tick-value">0</span>
+        </div>
+    </header>
+
+    <!-- ==================== CONTENEDOR PRINCIPAL ==================== -->
+    <main class="main-container">
+        <!-- Panel Izquierdo: Tabla de Tareas (TCB) -->
+        <section class="panel panel-tasks" aria-label="Tabla de control de tareas">
+            <h2>📋 Tareas (TCB)</h2>
+            <div id="taskContainer" class="task-container">
+                <!-- Las tarjetas de tareas se renderizan dinámicamente aquí -->
+            </div>
+        </section>
+
+        <!-- Panel Central: Visualización del Kernel -->
+        <section class="panel panel-kernel" aria-label="Visualización del kernel">
+            <h2>⚙️ Núcleo del RTOS</h2>
+
+            <!-- CPU -->
+            <div class="cpu-section">
+                <h3>🔴 CPU - Tarea en Ejecución</h3>
+                <div id="cpuSlot" class="cpu-slot empty-cpu">
+                    <span class="cpu-placeholder">IDLE</span>
+                </div>
+                <div id="contextSwitchIndicator" class="context-switch hidden">
+                    ⚡ Cambio de contexto
+                </div>
+            </div>
+
+            <!-- Cola de Ready -->
+            <div class="ready-queue-section">
+                <h3>📊 Cola de Tareas Listas (Ready Queue)</h3>
+                <p class="queue-hint">Ordenadas por prioridad (0 = máxima)</p>
+                <div id="readyQueue" class="ready-queue">
+                    <span class="empty-queue">Vacía</span>
+                </div>
+            </div>
+
+            <!-- Recursos: Semáforos y Colas -->
+            <div class="resources-section">
+                <h3>🔐 Recursos de Sincronización</h3>
+                <div id="semaphoreDisplay" class="resource-group">
+                    <!-- Semáforos -->
+                </div>
+                <div id="queueDisplay" class="resource-group">
+                    <!-- Colas de mensajes -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Panel Derecho: Log de Eventos -->
+        <section class="panel panel-log" aria-label="Registro de eventos">
+            <h2>📜 Log de Eventos del Sistema</h2>
+            <div id="eventLog" class="event-log">
+                <div class="log-entry system-message">🟢 Sistema inicializado. Esperando inicio de simulación...</div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ==================== ETIQUETA EXPLICATIVA ==================== -->
+    <section class="explanation-banner" id="explanationBanner" aria-live="polite">
+        <div class="banner-icon">💡</div>
+        <div class="banner-content">
+            <h3 id="bannerTitle">Bienvenido a la simulación RTOS</h3>
+            <p id="bannerText">Presiona <strong>"Iniciar Simulación"</strong> para comenzar a explorar cómo funciona un sistema operativo de tiempo real. Observa cómo el planificador selecciona tareas según su prioridad, cómo se gestionan los semáforos y las colas de mensajes.</p>
+        </div>
+        <div class="banner-step" id="bannerStep">Paso 0/18</div>
+    </section>
+
+    <!-- ==================== CONTROLES ==================== -->
+    <section class="controls-section">
+        <div class="controls-buttons">
+            <button id="btnStart" class="btn btn-primary" title="Iniciar la simulación desde el principio">
+                ▶️ Iniciar Simulación
+            </button>
+            <button id="btnStep" class="btn btn-secondary" disabled title="Avanzar un paso">
+                ⏭️ Siguiente Paso
+            </button>
+            <button id="btnAuto" class="btn btn-accent" disabled title="Ejecutar pasos automáticamente">
+                🔄 Auto-Play
+            </button>
+            <button id="btnReset" class="btn btn-outline" title="Reiniciar completamente la simulación">
+                🔁 Reiniciar
+            </button>
+            <button id="btnDownload" class="btn btn-download" disabled title="Descargar documento explicativo">
+                📥 Descargar Informe
+            </button>
+        </div>
+        <div class="speed-control">
+            <label for="speedSlider">Velocidad Auto-Play:</label>
+            <input type="range" id="speedSlider" min="500" max="3000" value="1500" step="250">
+            <span id="speedValue">1.5s</span>
+        </div>
+    </section>
+
+    <!-- ==================== FOOTER ==================== -->
+    <footer class="footer">
+        <p>Simulación educativa — Basada en FreeRTOS, QNX, Tanenbaum & Silberschatz | Estándares de sistemas operativos de tiempo real</p>
+    </footer>
+
+    <!-- Scripts modulares -->
+    <script src="js/kernel.js"></script>
+    <script src="js/task.js"></script>
+    <script src="js/queue.js"></script>
+    <script src="js/semaphore.js"></script>
+    <script src="js/scheduler.js"></script>
+    <script src="js/simulation.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/report.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
