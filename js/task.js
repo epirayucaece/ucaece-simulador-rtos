@@ -31,6 +31,13 @@ class Task {
         /** @type {string|null} Recurso por el cual está bloqueada (si aplica) */
         this.blockedOn = null;
 
+        /**
+         * Prioridad original antes de que el PIP la eleve temporalmente.
+         * null indica que no hay herencia de prioridad activa.
+         * @type {number|null}
+         */
+        this.originalPriority = null;
+
         /** @type {number} Tick en el que fue creada */
         this.createdAt = 0;
 

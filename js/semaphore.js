@@ -31,8 +31,9 @@ class Semaphore {
             return true;
         }
 
-        // Semáforo no disponible: bloquear tarea
+        // Semáforo no disponible: bloquear tarea (cola ordenada por prioridad)
         this.waitingTasks.push(task);
+        this.waitingTasks.sort((a, b) => a.priority - b.priority);
         task.setState('BLOCKED', `Esperando semáforo "${this.name}" (valor: 0)`);
         task.blockedOn = this.id;
         kernel.logEvent('block', `⛔ Semáforo "${this.name}" no disponible. Tarea "${task.name}" bloqueada.`);

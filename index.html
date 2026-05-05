@@ -51,11 +51,14 @@
                 </div>
             </div>
 
-            <!-- Recursos: Semáforos y Colas -->
+            <!-- Recursos: Semáforos, Mutexes y Colas -->
             <div class="resources-section">
                 <h3>🔐 Recursos de Sincronización</h3>
                 <div id="semaphoreDisplay" class="resource-group">
                     <!-- Semáforos -->
+                </div>
+                <div id="mutexDisplay" class="resource-group">
+                    <!-- Mutexes con PIP -->
                 </div>
                 <div id="queueDisplay" class="resource-group">
                     <!-- Colas de mensajes -->
@@ -71,6 +74,16 @@
             </div>
         </section>
     </main>
+
+    <!-- ==================== SELECTOR DE ESCENARIO ==================== -->
+    <nav class="scenario-tabs" aria-label="Selector de escenario">
+        <button id="tabBasic" class="tab-btn tab-active" title="Scheduling, semáforos y colas de mensajes">
+            📋 Escenario 1: Scheduling &amp; Semáforos
+        </button>
+        <button id="tabPIP" class="tab-btn" title="Inversión de prioridad y mutex con PIP">
+            🔺 Escenario 2: Mutex + Priority Inheritance Protocol
+        </button>
+    </nav>
 
     <!-- ==================== ETIQUETA EXPLICATIVA ==================== -->
     <section class="explanation-banner" id="explanationBanner" aria-live="polite">
@@ -118,6 +131,7 @@
     <script src="js/task.js"></script>
     <script src="js/queue.js"></script>
     <script src="js/semaphore.js"></script>
+    <script src="js/mutex.js"></script>
     <script src="js/scheduler.js"></script>
     <script src="js/simulation.js"></script>
     <script src="js/ui.js"></script>

@@ -27,6 +27,13 @@ class Simulation {
         this.autoPlayActive = false;
 
         /**
+         * Escenario activo: 'basic' = scheduling/semáforos/colas
+         *                   'pip'   = inversión de prioridad + mutex + PIP
+         * @type {'basic'|'pip'}
+         */
+        this.scenario = 'basic';
+
+        /**
          * Guion de pasos de la simulación.
          * Cada paso tiene: title, description, y una función action()
          * que modifica el estado del kernel.
@@ -36,10 +43,28 @@ class Simulation {
     }
 
     /**
-     * Construye el guion de simulación con todos los pasos
+     * Cambia el escenario activo y reconstruye los pasos.
+     * @param {'basic'|'pip'} scenario
+     */
+    setScenario(scenario) {
+        this.scenario = scenario;
+        this.buildSteps();
+    }
+
+    /**
+     * Construye el guion según el escenario activo
      */
     buildSteps() {
-        this.steps = [
+        this.steps = this.scenario === 'pip'
+            ? this.buildPIPSteps()
+            : this.buildBasicSteps();
+    }
+
+    /**
+     * Escenario básico: scheduling por prioridad, semáforos y colas de mensajes
+     */
+    buildBasicSteps() {
+        return [
             // Paso 0: Inicialización
             {
                 title: '🔧 Inicialización del Sistema',
@@ -392,6 +417,321 @@ class Simulation {
     }
 
     /**
+     * Escenario PIP: inversión de prioridad no acotada resuelta con mutex + PIP.
+     *
+     * Actores:
+     *   TL (prioridad 3 — baja): toma el mutex primero.
+     *   TH (prioridad 1 — alta): llega después, necesita el mutex → PIP eleva a TL.
+     *   TM (prioridad 2 — media): intenta preemptar a TL pero no puede gracias al PIP.
+     *
+     * Sin PIP: TM preemptaría a TL indefinidamente → TH esperaría tiempo no acotado.
+     * Con PIP: TL hereda la prioridad de TH → TM no puede interrumpir → TL libera
+     *          rápidamente → TH obtiene el mutex → inversión acotada al tiempo de la
+     *          sección crítica de TL.
+     *
+     * Referencia: Silberschatz (2006, p.647), González Harbour (2001).
+     */
+    buildPIPSteps() {
+        return [
+            // Paso 0: Inicialización
+            {
+                title: '🔧 Inicialización — Escenario Inversión de Prioridad',
+                description:
+                    'Se crean <strong>3 tareas</strong> para demostrar la inversión de prioridad y su solución:<br><br>' +
+                    '🔴 <strong>TL — Tarea Baja (prioridad 3)</strong>: única en READY al inicio. Tomará el mutex.<br>' +
+                    '🟡 <strong>TM — Tarea Media (prioridad 2)</strong>: bloqueada, activará después.<br>' +
+                    '🟢 <strong>TH — Tarea Alta (prioridad 1)</strong>: bloqueada, activará después y necesitará el mutex.<br><br>' +
+                    'Se crea un <strong>mutex "RecursoCompartido"</strong> (no un semáforo): tiene propietario y soporta PIP.',
+                action: () => {
+                    kernel.initialize();
+                    kernel.tasks = [];
+                    kernel.semaphores = [];
+                    kernel.messageQueues = [];
+                    kernel.mutexes = [];
+
+                    const taskTL = new Task('tl', 'TL — Tarea Baja (p:3)', 3,
+                        'Tarea de baja prioridad. Tomará el mutex primero.');
+                    const taskTM = new Task('tm', 'TM — Tarea Media (p:2)', 2,
+                        'Tarea de prioridad media. Intentará preemptar a TL.');
+                    const taskTH = new Task('th', 'TH — Tarea Alta (p:1)', 1,
+                        'Tarea de alta prioridad. Necesitará el mutex que tiene TL.');
+
+                    // TM y TH comienzan bloqueadas (sus eventos aún no ocurrieron)
+                    taskTM.state = 'BLOCKED';
+                    taskTM.blockedOn = 'evento_tm';
+                    taskTM.setInstruction('Esperando evento de activación...');
+                    taskTH.state = 'BLOCKED';
+                    taskTH.blockedOn = 'evento_th';
+                    taskTH.setInstruction('Esperando evento de activación...');
+
+                    [taskTL, taskTM, taskTH].forEach(t => {
+                        t.createdAt = kernel.systemTick;
+                        t.lastStateChange = kernel.systemTick;
+                        kernel.tasks.push(t);
+                    });
+
+                    const idleTask = new Task('idle', 'IDLE Task', 99, 'Tarea ociosa del sistema.');
+                    idleTask.state = 'READY';
+                    kernel.tasks.push(idleTask);
+                    scheduler.setIdleTask(idleTask);
+
+                    kernel.mutexes.push(new Mutex('mutex_shared', 'RecursoCompartido'));
+
+                    kernel.logEvent('system', '🔧 Escenario PIP listo. TL en READY. TH y TM bloqueadas.');
+                    kernel.logEvent('system', '📋 Solo TL está READY. Cola: TL(p:3). TH y TM esperan sus eventos.');
+                }
+            },
+
+            // Paso 1: Scheduler selecciona TL
+            {
+                title: '🎯 Scheduler Selecciona TL — Única Tarea READY',
+                description:
+                    'Solo <strong>TL (prioridad 3)</strong> está en READY. El scheduler la selecciona. ' +
+                    'TH y TM siguen bloqueadas esperando sus eventos.<br><br>' +
+                    'TL va a acceder a un recurso compartido protegido por <strong>mutex</strong>. ' +
+                    'Nota: se usa <strong>mutex</strong> (no semáforo binario) porque necesitamos ' +
+                    'rastrear la propiedad para poder aplicar PIP.',
+                action: () => {
+                    kernel.tick();
+                    const result = scheduler.schedule();
+                    kernel.logEvent('scheduler', `🎯 ${result.reason}`);
+                    const taskTL = kernel.getTaskById('tl');
+                    if (taskTL && taskTL.state === 'RUNNING') {
+                        taskTL.setInstruction('Iniciando trabajo. Accederé al recurso compartido...');
+                        taskTL.incrementExecution();
+                    }
+                }
+            },
+
+            // Paso 2: TL adquiere el mutex
+            {
+                title: '🔑 TL Adquiere el Mutex — Entra a Sección Crítica',
+                description:
+                    '<strong>TL</strong> solicita el mutex <strong>"RecursoCompartido"</strong>. ' +
+                    'Como está libre, lo adquiere y se convierte en <strong>propietaria</strong>.<br><br>' +
+                    '🔑 <strong>Diferencia clave Mutex vs Semáforo</strong>:<br>' +
+                    'El mutex registra quién lo tomó. Solo TL podrá liberarlo. ' +
+                    'Esta propiedad es esencial para que el PIP funcione: el kernel sabe ' +
+                    'a quién elevarle la prioridad cuando llegue TH.',
+                action: () => {
+                    kernel.tick();
+                    const taskTL = kernel.getTaskById('tl');
+                    const mutex = kernel.mutexes.find(m => m.id === 'mutex_shared');
+                    if (taskTL && mutex && taskTL.state === 'RUNNING') {
+                        taskTL.setInstruction('Adquiriendo mutex RecursoCompartido...');
+                        mutex.acquire(taskTL);
+                        taskTL.setInstruction('Mutex adquirido. Ejecutando sección crítica...');
+                        taskTL.incrementExecution();
+                    }
+                }
+            },
+
+            // Paso 3: TH llega — preempta TL — intenta mutex — BLOCKED — PIP actúa
+            {
+                title: '⚡ TH Llega → Preempta TL → Mutex Bloqueado → 🔺 PIP ACTÚA',
+                description:
+                    '<strong>TH (prioridad 1)</strong> recibe su evento y pasa a READY. ' +
+                    'Como TH tiene mayor prioridad que TL (p:3), el scheduler <strong>preempta a TL</strong>.<br><br>' +
+                    'TH intenta adquirir el mutex → está tomado por TL → <strong>TH se BLOQUEA</strong>.<br><br>' +
+                    '🔺 <strong>¡PROTOCOLO DE HERENCIA DE PRIORIDAD (PIP)!</strong><br>' +
+                    'El kernel detecta que TH (p:1) espera un mutex que posee TL (p:3). ' +
+                    'Eleva temporalmente la prioridad de TL a <strong>1</strong> (la de TH). ' +
+                    'TL pasa a ejecutar con prioridad heredada, protegida de interrupciones de TM.',
+                action: () => {
+                    kernel.tick();
+                    const taskTH = kernel.getTaskById('th');
+                    const taskTL = kernel.getTaskById('tl');
+                    const mutex = kernel.mutexes.find(m => m.id === 'mutex_shared');
+
+                    // TH se activa
+                    if (taskTH && taskTH.state === 'BLOCKED') {
+                        taskTH.setState('READY', 'Evento recibido: TH pasa a READY');
+                        taskTH.blockedOn = null;
+                        taskTH.setInstruction('¡Evento recibido! Necesito el mutex urgentemente...');
+                    }
+
+                    // TH preempta a TL
+                    const result1 = scheduler.schedule();
+                    kernel.logEvent('scheduler', `⚡ ${result1.reason}`);
+
+                    // TH intenta adquirir mutex — PIP se activa aquí
+                    if (taskTH && taskTH.state === 'RUNNING' && mutex) {
+                        taskTH.setInstruction('Intentando adquirir mutex RecursoCompartido...');
+                        mutex.acquire(taskTH); // → TH BLOCKED, PIP eleva TL
+                        taskTH.setInstruction('Bloqueada esperando mutex. PIP elevó prioridad de TL...');
+                    }
+
+                    // Re-evaluar: TL (ahora con prioridad heredada 1) debería retomar CPU
+                    const result2 = scheduler.reschedule();
+                    kernel.logEvent('scheduler', `🔄 Tras PIP → ${result2.reason}`);
+                    if (taskTL && taskTL.state === 'RUNNING') {
+                        taskTL.setInstruction(
+                            `Reanuda con prioridad HEREDADA ${taskTL.priority} (original: 3). ` +
+                            `Completando sección crítica rápidamente...`
+                        );
+                    }
+                }
+            },
+
+            // Paso 4: TM llega — intenta preemptar — NO PUEDE (PIP activo)
+            {
+                title: '🛡️ TM Llega — Intenta Preemptar TL — FALLA por PIP',
+                description:
+                    '<strong>TM (prioridad 2)</strong> recibe su evento y pasa a READY. ' +
+                    'Sin PIP, TM preemptaría a TL (p:3) y la bloquearía indefinidamente.<br><br>' +
+                    '🛡️ <strong>PIP en acción</strong>: TL ejecuta con prioridad heredada <strong>1</strong>. ' +
+                    'La prioridad 2 de TM es <strong>menor</strong> que 1, por lo que TM ' +
+                    '<strong>NO PUEDE preemptar</strong> a TL. TM queda en READY esperando.<br><br>' +
+                    '⚠️ <strong>Sin PIP</strong>: TM habría preemptado a TL, TH habría esperado ' +
+                    'todo el tiempo de ejecución de TM — inversión de prioridad <em>no acotada</em>.',
+                action: () => {
+                    kernel.tick();
+                    const taskTM = kernel.getTaskById('tm');
+                    const taskTL = kernel.getTaskById('tl');
+
+                    // TM se activa
+                    if (taskTM && taskTM.state === 'BLOCKED') {
+                        taskTM.setState('READY', 'Evento recibido: TM pasa a READY');
+                        taskTM.blockedOn = null;
+                        taskTM.setInstruction('Quiero la CPU... pero el PIP me lo impide.');
+                    }
+
+                    // El scheduler evalúa: TL (p:1 heredada) vs TM (p:2) → TL gana
+                    const result = scheduler.schedule();
+                    kernel.logEvent('pip',
+                        `🛡️ TM (p:2) NO puede preemptar a TL (p:${taskTL ? taskTL.priority : '?'} heredada por PIP). ` +
+                        `Sin PIP, TM habría interrumpido a TL indefinidamente.`
+                    );
+                    kernel.logEvent('scheduler', result.reason);
+
+                    if (taskTL && taskTL.state === 'RUNNING') {
+                        taskTL.setInstruction('Completando sección crítica. TM no puede interrumpirme (PIP activo).');
+                        taskTL.incrementExecution();
+                    }
+                }
+            },
+
+            // Paso 5: TL libera mutex — PIP restaurado — TH toma mutex y preempta
+            {
+                title: '🔓 TL Libera Mutex → 🔻 PIP Restaurado → TH Toma el Control',
+                description:
+                    '<strong>TL</strong> completa su sección crítica y <strong>libera el mutex</strong>.<br><br>' +
+                    '🔻 <strong>PIP RESTAURADO</strong>: La prioridad de TL vuelve a <strong>3</strong> (su valor original).<br><br>' +
+                    'El mutex pasa a <strong>TH</strong> (la tarea de mayor prioridad en espera). ' +
+                    'TH pasa a READY con el mutex. Como TH (p:1) ahora tiene mayor prioridad ' +
+                    'que TL (p:3 restaurada), el scheduler <strong>preempta a TL</strong> y TH toma la CPU. ' +
+                    'La inversión de prioridad quedó <strong>acotada</strong> al tiempo de la sección crítica de TL.',
+                action: () => {
+                    kernel.tick();
+                    const taskTL = kernel.getTaskById('tl');
+                    const mutex = kernel.mutexes.find(m => m.id === 'mutex_shared');
+
+                    if (taskTL && mutex && taskTL.state === 'RUNNING') {
+                        taskTL.setInstruction('Liberando mutex RecursoCompartido...');
+                        mutex.release(taskTL); // → PIP restaurado, TH desbloquea
+                        taskTL.setInstruction('Mutex liberado. Prioridad restaurada a 3.');
+                    }
+
+                    // TH (p:1) ahora en READY → preempta a TL (p:3 restaurada)
+                    const result = scheduler.reschedule();
+                    kernel.logEvent('scheduler', `⚡ ${result.reason}`);
+                    const taskTH = kernel.getTaskById('th');
+                    if (taskTH && taskTH.state === 'RUNNING') {
+                        taskTH.setInstruction('¡Mutex adquirido! Ejecutando sección crítica de alta prioridad...');
+                        taskTH.incrementExecution();
+                    }
+                }
+            },
+
+            // Paso 6: TH completa — TM obtiene CPU
+            {
+                title: '✅ TH Completa — TM Obtiene la CPU',
+                description:
+                    '<strong>TH</strong> completa su trabajo crítico y se bloquea. ' +
+                    'Ahora <strong>TM (prioridad 2)</strong> es la siguiente en READY. ' +
+                    'El scheduler le asigna la CPU.<br><br>' +
+                    '📊 <strong>Orden de ejecución con PIP</strong>: TL (sección crítica) → TH → TM → TL (resto)<br>' +
+                    '📊 <strong>Sin PIP habría sido</strong>: TL → TM (interrupción larga) → TL → TH (tardía)<br><br>' +
+                    'El PIP garantizó que TH (alta prioridad) no fuera bloqueada por TM (media prioridad).',
+                action: () => {
+                    kernel.tick();
+                    const taskTH = kernel.getTaskById('th');
+                    if (taskTH && taskTH.state === 'RUNNING') {
+                        taskTH.setState('BLOCKED', 'Trabajo crítico completado');
+                        taskTH.blockedOn = 'completado';
+                        taskTH.setInstruction('Trabajo completado exitosamente.');
+                    }
+                    const result = scheduler.reschedule();
+                    kernel.logEvent('scheduler', `✅ ${result.reason}`);
+                    const taskTM = kernel.getTaskById('tm');
+                    if (taskTM && taskTM.state === 'RUNNING') {
+                        taskTM.setInstruction('Ahora sí puedo ejecutar. TH ya terminó su trabajo crítico.');
+                        taskTM.incrementExecution();
+                    }
+                }
+            },
+
+            // Paso 7: TM completa — TL ejecuta con prioridad restaurada
+            {
+                title: '📋 TM Completa — TL Retoma con su Prioridad Original (3)',
+                description:
+                    '<strong>TM</strong> finaliza. <strong>TL (prioridad 3 restaurada)</strong> ' +
+                    'retoma la CPU para completar su trabajo restante.<br><br>' +
+                    'Observá que TL ahora opera con su <strong>prioridad original 3</strong>, ' +
+                    'no la heredada. El sistema de prioridades volvió a su orden natural.<br><br>' +
+                    '🏁 La inversión de prioridad duró exactamente el tiempo de la sección crítica de TL. ' +
+                    'El PIP la convirtió de <em>no acotada</em> a <em>acotada</em>.',
+                action: () => {
+                    kernel.tick();
+                    const taskTM = kernel.getTaskById('tm');
+                    if (taskTM && taskTM.state === 'RUNNING') {
+                        taskTM.setState('BLOCKED', 'TM completó su trabajo');
+                        taskTM.setInstruction('Trabajo completado.');
+                    }
+                    const result = scheduler.reschedule();
+                    kernel.logEvent('scheduler', `📋 ${result.reason}`);
+                    const taskTL = kernel.getTaskById('tl');
+                    if (taskTL && taskTL.state === 'RUNNING') {
+                        taskTL.setInstruction('Continuando trabajo con prioridad original 3. Sistema normalizado.');
+                        taskTL.incrementExecution();
+                    }
+                }
+            },
+
+            // Paso 8: Resumen
+            {
+                title: '🏁 Resumen — ¿Qué Resolvió el PIP?',
+                description:
+                    '<strong>Sin PIP — Inversión NO acotada:</strong><br>' +
+                    '1. TL toma mutex (p:3) → 2. TH llega (p:1), bloquea esperando mutex → ' +
+                    '3. TM preempta a TL indefinidamente → 4. TH espera todo el tiempo de TM → ' +
+                    '<em>Tiempo de espera de TH no acotado</em> ❌<br><br>' +
+                    '<strong>Con PIP — Inversión acotada:</strong><br>' +
+                    '1. TL toma mutex (p:3) → 2. TH llega (p:1), bloquea → ' +
+                    '<strong>PIP eleva TL a p:1</strong> → 3. TM (p:2) no puede preemptar → ' +
+                    '4. TL libera mutex rápidamente → 5. TH obtiene CPU → ' +
+                    '<em>Inversión acotada al tiempo de sección crítica de TL</em> ✅<br><br>' +
+                    '📚 <em>Silberschatz (2006, p.647): "VxWorks proporciona cerrojos mutex con ' +
+                    'protocolo de herencia de prioridades para evitar la inversión de prioridad."</em>',
+                action: () => {
+                    kernel.tick();
+                    kernel.logEvent('system', '🏁 Escenario PIP completado.');
+                    kernel.logEvent('system',
+                        '📊 Resultado: TH (alta prioridad) obtuvo el mutex sin ser bloqueada ' +
+                        'indefinidamente por TM (media prioridad). PIP funcionó correctamente.'
+                    );
+                    kernel.logEvent('system',
+                        '📚 Refs: González Harbour (2001) — POSIX de tiempo real; ' +
+                        'Silberschatz (2006, p.647) — Fundamentos de SO; ' +
+                        'FreeRTOS Reference Manual — Mutex and Priority Inheritance.'
+                    );
+                    this.completed = true;
+                }
+            }
+        ];
+    }
+
+    /**
      * Crea las tareas de demostración
      */
     createTasks() {
@@ -467,10 +807,12 @@ class Simulation {
         kernel.initialize();
         kernel.tasks = [];
         kernel.semaphores = [];
+        kernel.mutexes = [];
         kernel.messageQueues = [];
         kernel.runningTask = null;
         kernel.systemTick = 0;
         kernel.eventLog = [];
+        this.buildSteps(); // reconstruir según escenario activo
     }
 
     /**

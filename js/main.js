@@ -15,6 +15,10 @@
     const speedSlider = document.getElementById('speedSlider');
     const speedValue = document.getElementById('speedValue');
 
+    // Tabs de escenario
+    const tabBasic = document.getElementById('tabBasic');
+    const tabPIP = document.getElementById('tabPIP');
+
     /**
      * Ejecuta un paso de simulación y actualiza la UI
      */
@@ -105,6 +109,25 @@
         speedValue.textContent = (val / 1000).toFixed(1) + 's';
     }
 
+    /**
+     * Cambia el escenario activo y reinicia la simulación
+     * @param {'basic'|'pip'} scenario
+     */
+    function switchScenario(scenario) {
+        simulation.stopAutoPlay();
+        simulation.setScenario(scenario);
+        simulation.reset();
+        simulation.started = false;
+
+        // Actualizar estado visual de las tabs
+        tabBasic.classList.toggle('tab-active', scenario === 'basic');
+        tabPIP.classList.toggle('tab-active', scenario === 'pip');
+
+        ui.resetBanner();
+        ui.refresh();
+        ui.updateButtons(false, false, false);
+    }
+
     // Event listeners
     btnStart.addEventListener('click', startSimulation);
     btnStep.addEventListener('click', stepForward);
@@ -113,6 +136,9 @@
     btnDownload.addEventListener('click', () => {
         ReportGenerator.download();
     });
+
+    tabBasic.addEventListener('click', () => switchScenario('basic'));
+    tabPIP.addEventListener('click', () => switchScenario('pip'));
 
     speedSlider.addEventListener('input', () => {
         updateSpeedLabel();

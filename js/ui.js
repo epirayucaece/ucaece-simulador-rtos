@@ -11,6 +11,7 @@ class UI {
         this.readyQueue = document.getElementById('readyQueue');
         this.eventLog = document.getElementById('eventLog');
         this.semaphoreDisplay = document.getElementById('semaphoreDisplay');
+        this.mutexDisplay = document.getElementById('mutexDisplay');
         this.queueDisplay = document.getElementById('queueDisplay');
         this.contextSwitchIndicator = document.getElementById('contextSwitchIndicator');
         this.systemTickSpan = document.getElementById('systemTick');
@@ -28,6 +29,7 @@ class UI {
         this.renderCPU();
         this.renderReadyQueue();
         this.renderSemaphores();
+        this.renderMutexes();
         this.renderMessageQueues();
         this.renderEventLog();
         this.updateSystemTick();
@@ -58,12 +60,17 @@ class UI {
             };
             const badgeClass = stateClassMap[task.state] || 'badge-ready';
 
+            const pipBadge = task.originalPriority !== null
+                ? `<span class="pip-badge">🔺 PIP p:${task.priority} (orig: ${task.originalPriority})</span>`
+                : '';
+
             card.innerHTML = `
                 <div class="task-header">
                     <span class="task-name">${task.name}</span>
                     <span class="task-priority">P: ${task.priority}</span>
                 </div>
                 <span class="task-state-badge ${badgeClass}">${task.state}</span>
+                ${pipBadge}
                 <div class="task-info">Ejecuciones: ${task.executionCount}</div>
                 <div class="task-instruction">📎 ${task.currentInstruction}</div>
                 ${task.blockedOn ? `<div class="task-info" style="color:var(--color-warning);">🔒 Bloqueado por: ${task.blockedOn}</div>` : ''}
@@ -129,6 +136,39 @@ class UI {
                 ${sem.waitingTasks.length > 0 ? `<span style="color:var(--color-warning);font-size:0.65rem;">⏳ ${sem.waitingTasks.length} esperando</span>` : ''}
             `;
             this.semaphoreDisplay.appendChild(div);
+        });
+    }
+
+    /**
+     * Muestra los mutexes con estado de propietario y cola de espera (PIP)
+     */
+    renderMutexes() {
+        if (!this.mutexDisplay) return;
+        this.mutexDisplay.innerHTML = '<h3>🔑 Mutexes (PIP)</h3>';
+
+        if (!kernel.mutexes || kernel.mutexes.length === 0) {
+            this.mutexDisplay.innerHTML +=
+                '<span style="font-size:0.75rem;color:var(--color-text-muted);">No hay mutexes creados</span>';
+            return;
+        }
+
+        kernel.mutexes.forEach(mtx => {
+            const locked = mtx.isLocked();
+            const div = document.createElement('div');
+            div.className = 'resource-item mutex-item';
+            div.innerHTML = `
+                <span class="resource-indicator ${locked ? 'resource-taken' : 'resource-free'}"></span>
+                <strong>${mtx.name}</strong>
+                <span style="font-size:0.7rem;">${locked ? '🔒 Tomado' : '🔓 Libre'}</span>
+                ${locked ? `<span style="font-size:0.65rem;color:var(--color-text-muted);">Propietario: <strong>${mtx.owner.name}</strong></span>` : ''}
+                ${locked && mtx.owner.originalPriority !== null
+                    ? `<span class="pip-active-tag">🔺 PIP activo (p:${mtx.owner.priority}←orig:${mtx.owner.originalPriority})</span>`
+                    : ''}
+                ${mtx.waitingTasks.length > 0
+                    ? `<span style="color:var(--color-warning);font-size:0.65rem;">⏳ ${mtx.waitingTasks.length} esperando: ${mtx.waitingTasks.map(t => t.name).join(', ')}</span>`
+                    : ''}
+            `;
+            this.mutexDisplay.appendChild(div);
         });
     }
 
@@ -209,9 +249,20 @@ class UI {
      * Restablece el banner a su estado inicial
      */
     resetBanner() {
-        this.bannerTitle.textContent = 'Bienvenido a la simulación RTOS';
-        this.bannerText.innerHTML = 'Presiona <strong>"Iniciar Simulación"</strong> para comenzar a explorar cómo funciona un sistema operativo de tiempo real. Observa cómo el planificador selecciona tareas según su prioridad, cómo se gestionan los semáforos y las colas de mensajes.';
-        this.bannerStep.textContent = 'Paso 0/18';
+        if (simulation.scenario === 'pip') {
+            this.bannerTitle.textContent = 'Escenario: Mutex + Priority Inheritance Protocol (PIP)';
+            this.bannerText.innerHTML =
+                'Presiona <strong>"Iniciar Simulación"</strong> para ver cómo el PIP resuelve la ' +
+                '<strong>inversión de prioridad no acotada</strong>. ' +
+                'Observá cómo TL hereda la prioridad de TH para evitar que TM la interrumpa.';
+            this.bannerStep.textContent = `Paso 0/${simulation.steps.length}`;
+        } else {
+            this.bannerTitle.textContent = 'Bienvenido a la simulación RTOS';
+            this.bannerText.innerHTML =
+                'Presiona <strong>"Iniciar Simulación"</strong> para explorar cómo funciona un ' +
+                'sistema operativo de tiempo real: scheduling por prioridad, semáforos, colas y preempción.';
+            this.bannerStep.textContent = `Paso 0/${simulation.steps.length}`;
+        }
     }
 
     /**

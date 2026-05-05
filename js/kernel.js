@@ -18,6 +18,9 @@ class Kernel {
         /** @type {Semaphore[]} Semáforos del sistema */
         this.semaphores = [];
 
+        /** @type {Mutex[]} Mutexes del sistema (soportan PIP) */
+        this.mutexes = [];
+
         /** @type {MessageQueue[]} Colas de mensajes del sistema */
         this.messageQueues = [];
 
@@ -40,6 +43,7 @@ class Kernel {
         this.eventLog = [];
         this.contextSwitchOccurred = false;
         this.preemptedTask = null;
+        this.mutexes = [];
         this.logEvent('system', '🟢 Kernel RTOS inicializado. Tick del sistema: 0');
     }
 
@@ -68,12 +72,13 @@ class Kernel {
     }
 
     /**
-     * Obtiene las tareas en estado READY ordenadas por prioridad (0 primero)
+     * Obtiene las tareas en estado READY ordenadas por prioridad (0 primero).
+     * Excluye la tarea IDLE para que el scheduler la maneje por camino especial.
      * @returns {Task[]}
      */
     getReadyTasks() {
         return this.tasks
-            .filter(t => t.state === 'READY')
+            .filter(t => t.state === 'READY' && t.id !== 'idle')
             .sort((a, b) => a.priority - b.priority);
     }
 
